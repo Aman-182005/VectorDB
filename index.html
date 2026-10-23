@@ -1,0 +1,1406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>VectorDB · Semantic Search Lab</title>
+<script>
+  // Set the theme before first paint so there is no flash.
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('vdb-theme'); } catch (e) {}
+    if (!t) t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<!-- Browser-side extraction helpers for PDF and image uploads. Internet is required to load these libraries. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #EEF1F6;
+  --map-bg: #F7F9FC;
+  --dot: #D9DFEA;
+  --surface: #FFFFFF;
+  --surface-2: #F3F6FA;
+  --line: #E0E5EE;
+  --line-strong: #C5CDDB;
+  --ink: #141C2B;
+  --ink-2: #444F66;
+  --muted: #667389;
+  --focus: #2F5BFF;
+  --cs: #1D74E8;
+  --math: #8450E0;
+  --food: #D9701A;
+  --sports: #0F9462;
+  --doc: #D4326F;
+  --good: #0F7F58;
+  --bad: #C4344A;
+  --shadow: 0 1px 2px rgba(20,28,43,.08), 0 14px 32px -16px rgba(20,28,43,.28);
+}
+html[data-theme="dark"] {
+  --bg: #0A0F1A;
+  --map-bg: #0D1320;
+  --dot: #1D2739;
+  --surface: #121927;
+  --surface-2: #19212F;
+  --line: #242E41;
+  --line-strong: #36435D;
+  --ink: #EEF2F9;
+  --ink-2: #B7C1D4;
+  --muted: #8995AB;
+  --focus: #7B9BFF;
+  --cs: #4C9AFF;
+  --math: #A783FF;
+  --food: #FFA24D;
+  --sports: #3DD598;
+  --doc: #FF6B9A;
+  --good: #3DD598;
+  --bad: #FF6B81;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 14px 32px -12px rgba(0,0,0,.6);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+body {
+  font-family: 'Bricolage Grotesque', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--ink);
+  font-size: 14px; line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.num { font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace; font-variant-numeric: tabular-nums; }
+.i { width: 18px; height: 18px; flex-shrink: 0; }
+[hidden] { display: none !important; }
+
+/* ── App shell ───────────────────────────────────────── */
+.app { height: 100vh; height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+
+.top {
+  display: grid; grid-template-columns: 1fr minmax(260px, 640px) 1fr; align-items: center; gap: 16px;
+  padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; justify-self: start; min-width: 0; }
+.brand .mark { width: 28px; height: 28px; flex-shrink: 0; }
+.brand .name { font-size: 17px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+.brand .tag { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+
+.searchbar {
+  display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 5px 0 13px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+  transition: border-color .15s, background .15s;
+}
+.searchbar:focus-within { border-color: var(--ink); background: var(--surface); }
+.searchbar .i { color: var(--muted); }
+.searchbar input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; height: 100%; font-size: 14.5px; }
+.searchbar input::placeholder { color: var(--muted); }
+
+.top-right { display: flex; align-items: center; gap: 10px; justify-self: end; }
+.stat { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px;
+  border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface);
+  font-size: 12.5px; font-weight: 550; color: var(--ink-2); white-space: nowrap;
+}
+.status-pill .led { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status-pill.ok .led { background: var(--good); }
+.status-pill.err .led { background: var(--bad); }
+.icon-btn {
+  width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: 9px;
+  border: 1px solid transparent; background: transparent; color: var(--ink-2);
+}
+.icon-btn:hover { background: var(--surface-2); border-color: var(--line); }
+
+/* ── Buttons & fields ────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid transparent;
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+  transition: background .15s, opacity .15s, border-color .15s;
+}
+.btn:disabled { opacity: .55; cursor: progress; }
+.btn.primary { background: var(--ink); color: var(--surface); }
+.btn.primary:not(:disabled):hover { opacity: .88; }
+.btn.quiet { background: var(--surface); border-color: var(--line-strong); color: var(--ink); }
+.btn.quiet:not(:disabled):hover { background: var(--surface-2); }
+.btn.block { width: 100%; height: 38px; }
+
+.field, .textarea {
+  width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px;
+  padding: 0 11px; height: 38px; font-size: 13.5px; outline: none; transition: border-color .15s, background .15s;
+}
+.field:focus, .textarea:focus { border-color: var(--ink); background: var(--surface); }
+.field::placeholder, .textarea::placeholder { color: var(--muted); }
+.textarea { height: auto; min-height: 110px; padding: 10px 11px; resize: vertical; line-height: 1.5; }
+.select { position: relative; display: block; }
+.select select { appearance: none; -webkit-appearance: none; padding-right: 30px; cursor: pointer; }
+.select::after {
+  content: ""; position: absolute; right: 12px; top: 50%; width: 6px; height: 6px; pointer-events: none;
+  border-right: 1.6px solid var(--muted); border-bottom: 1.6px solid var(--muted); transform: translateY(-70%) rotate(45deg);
+}
+.select select option { background: var(--surface); color: var(--ink); }
+input[type=range] { accent-color: var(--ink); width: 96px; cursor: pointer; }
+
+/* ── Stage: map + drawer ─────────────────────────────── */
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); min-height: 0; }
+.map-wrap { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--map-bg); }
+#scatter { position: absolute; inset: 0; display: block; }
+
+.map-tools {
+  position: absolute; top: 14px; left: 14px; right: 14px; z-index: 3;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; width: fit-content; max-width: calc(100% - 28px);
+  padding: 6px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+}
+.tool { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.tool .select select { height: 32px; font-size: 13px; color: var(--ink); width: auto; min-width: 150px; }
+.tool output { min-width: 18px; text-align: right; color: var(--ink); font-size: 12.5px; }
+.sep { width: 1px; height: 22px; background: var(--line); }
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--surface-2); border-radius: 10px; }
+.seg button {
+  height: 28px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ink-2); font-size: 13px; font-weight: 550; transition: background .15s, color .15s;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-checked="true"] { background: var(--ink); color: var(--surface); }
+.tools-actions { display: flex; gap: 8px; }
+
+.popover {
+  position: absolute; z-index: 4; right: 14px; top: calc(var(--tools-bottom, 70px) + 8px); width: min(310px, calc(100% - 28px));
+  padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.popover h3 { font-size: 14px; font-weight: 650; }
+.popover p { font-size: 12.5px; color: var(--muted); margin-top: -4px; }
+
+.legend { position: absolute; left: 14px; bottom: 14px; right: 14px; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.legend-chip {
+  pointer-events: auto; display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px 0 9px;
+  border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); font-size: 12.5px; font-weight: 550; color: var(--ink);
+  transition: opacity .15s, background .15s;
+}
+.legend-chip:hover { background: var(--surface-2); }
+.legend-chip i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); border: 2px solid var(--c); transition: background .15s; }
+.legend-chip .count { color: var(--muted); font-size: 12px; }
+.legend-chip[aria-pressed="false"] { opacity: .55; }
+.legend-chip[aria-pressed="false"] i { background: transparent; }
+
+.map-caption { position: absolute; right: 16px; bottom: 18px; font-size: 12px; color: var(--muted); z-index: 1; max-width: 260px; text-align: right; pointer-events: none; }
+
+.banner {
+  position: absolute; z-index: 5; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(380px, calc(100% - 40px));
+  padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 10px; text-align: left;
+}
+.banner h3 { font-size: 16px; font-weight: 650; }
+.banner p { color: var(--ink-2); font-size: 13.5px; }
+.banner code, .code { font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace; font-size: 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+
+#tip {
+  position: fixed; z-index: 50; display: none; pointer-events: none; max-width: 240px;
+  padding: 8px 11px; background: var(--ink); color: var(--surface); border-radius: 9px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--shadow);
+}
+#tip b { display: block; font-weight: 650; margin-bottom: 1px; }
+
+/* ── Drawer ──────────────────────────────────────────── */
+.drawer { background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.tabs { display: flex; padding: 0 8px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.tab {
+  flex: 1; height: 46px; border: 0; background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 600;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s;
+}
+.tab:hover { color: var(--ink); }
+.tab.on { color: var(--ink); border-bottom-color: var(--ink); }
+.tab-panel { display: none; flex: 1; min-height: 0; overflow-y: auto; padding: 18px; flex-direction: column; gap: 24px; }
+.tab-panel.on { display: flex; }
+.section { display: flex; flex-direction: column; gap: 10px; }
+.section h3 { font-size: 14px; font-weight: 650; }
+.caption { font-size: 12.5px; color: var(--muted); }
+.empty { padding: 14px; border: 1px dashed var(--line-strong); border-radius: 10px; font-size: 13px; color: var(--ink-2); display: flex; flex-direction: column; gap: 10px; }
+.try { display: flex; flex-wrap: wrap; gap: 6px; }
+.try button {
+  height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface);
+  font-size: 12.5px; font-weight: 550; transition: background .15s;
+}
+.try button:hover { background: var(--surface-2); }
+
+.latency { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.latency .val { font-size: 30px; font-weight: 500; letter-spacing: -.02em; line-height: 1; }
+.latency .sub { font-size: 12.5px; color: var(--muted); }
+
+.results, .doc-list { display: flex; flex-direction: column; gap: 8px; }
+.rcard, .dcard { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 12px; transition: border-color .15s, background .15s; }
+.rcard:hover, .rcard.hover { border-color: var(--line-strong); background: var(--surface-2); }
+.rcard { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 11px; align-items: start; }
+.rank { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--c); color: #fff; font-size: 12px; font-weight: 700; }
+.rtext { font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.rmeta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.pill {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  color: var(--c); background: color-mix(in srgb, var(--c) 13%, transparent);
+}
+.remove { width: 26px; height: 26px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); border-radius: 7px; }
+.remove:hover { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+.remove .i { width: 14px; height: 14px; }
+
+#vecCvs { display: block; width: 100%; height: 92px; }
+.bench { display: flex; flex-direction: column; gap: 11px; }
+.brow { display: flex; flex-direction: column; gap: 5px; }
+.blabel { display: flex; justify-content: space-between; font-size: 13px; font-weight: 550; }
+.blabel .num { font-weight: 400; color: var(--ink-2); font-size: 12.5px; }
+.btrack { height: 8px; background: var(--surface-2); border-radius: 5px; overflow: hidden; }
+.bfill { height: 100%; border-radius: 5px; transition: width .5s ease; }
+.layers { display: flex; flex-direction: column; gap: 8px; }
+.lrow { display: grid; grid-template-columns: 52px 1fr auto; align-items: center; gap: 10px; font-size: 12.5px; }
+.ltrack { height: 8px; background: var(--surface-2); border-radius: 5px; overflow: hidden; }
+.lfill { height: 100%; background: var(--ink); border-radius: 5px; opacity: .75; transition: width .4s; }
+.lcount { color: var(--muted); font-size: 12px; text-align: right; }
+
+.ollama-box { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; background: var(--surface); }
+.ollama-box.ok { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.ollama-box.err { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.ollama-box .row { display: flex; justify-content: space-between; gap: 10px; }
+.ollama-box .row span:first-child { color: var(--muted); }
+.ollama-box strong { font-weight: 650; display: flex; align-items: center; gap: 7px; }
+.ollama-box strong i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.ollama-box .steps { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.form { display: flex; flex-direction: column; gap: 9px; }
+.form-status { font-size: 12.5px; min-height: 18px; color: var(--muted); }
+.form-status.ok { color: var(--good); }
+
+.form-status.err { color: var(--bad); }
+.preview-list { display:flex; flex-direction:column; gap:12px; }
+.preview-card { border:1px solid var(--line); border-radius:10px; padding:12px; background:var(--surface); display:flex; flex-direction:column; gap:8px; }
+.preview-head { display:flex; justify-content:space-between; gap:8px; align-items:center; font-weight:650; overflow-wrap:anywhere; }
+.preview-head small { color:var(--muted); font-weight:400; }
+.preview-card textarea { min-height:140px; }
+
+
+.dcard-title { font-size: 13.5px; font-weight: 650; margin-bottom: 3px; overflow-wrap: anywhere; }
+.dcard-preview { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.dcard-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--muted); }
+
+/* ── Ask ─────────────────────────────────────────────── */
+.ask-row { display: flex; gap: 8px; }
+.ask-row .select { flex-shrink: 0; }
+.ask-row .select select { width: auto; min-width: 128px; }
+.ask-row .btn { flex: 1; height: 38px; }
+.thread { display: flex; flex-direction: column; gap: 14px; }
+.turn { display: flex; flex-direction: column; gap: 8px; }
+.q { align-self: flex-end; max-width: 90%; background: var(--ink); color: var(--surface); padding: 9px 13px; border-radius: 14px 14px 4px 14px; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.a { align-self: flex-start; max-width: 100%; background: var(--surface-2); border: 1px solid var(--line); padding: 12px 14px; border-radius: 14px 14px 14px 4px; }
+.a-text { font-size: 13.5px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.a-text.typing::after { content: ""; display: inline-block; width: 7px; height: 14px; margin-left: 2px; vertical-align: -2px; background: var(--ink); animation: blink 1s step-end infinite; }
+.a-text.err { color: var(--bad); }
+.a-model { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.ctx { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ctx-title { font-size: 12px; color: var(--muted); margin-bottom: 7px; }
+.chip {
+  display: inline-block; max-width: 100%; margin: 0 5px 5px 0; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong);
+  background: var(--surface); font-size: 12px; font-weight: 550; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chip:hover { background: var(--surface-2); }
+.chip[aria-expanded="true"] { border-color: var(--ink); }
+.ctx-expand { margin: 2px 0 8px; padding: 10px 12px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.thinking { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--muted); }
+.spinner { width: 15px; height: 15px; border: 2px solid var(--line-strong); border-top-color: var(--ink); border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes blink { 50% { opacity: 0; } }
+
+#toast {
+  position: fixed; z-index: 60; left: 50%; bottom: 22px; transform: translate(-50%, 12px); opacity: 0; pointer-events: none;
+  padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--surface); font-size: 13px; font-weight: 550;
+  box-shadow: var(--shadow); transition: opacity .2s, transform .2s; max-width: calc(100vw - 32px);
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+
+/* ── Small screens ───────────────────────────────────── */
+@media (max-width: 980px) {
+  body { overflow-y: auto; }
+  .app { height: auto; min-height: 100dvh; display: block; }
+  .top { grid-template-columns: 1fr auto; grid-template-areas: "brand right" "search search"; gap: 10px 12px; padding: 10px 14px; }
+  .brand { grid-area: brand; } .top-right { grid-area: right; } .searchbar { grid-area: search; }
+  .stat { display: none; }
+  .stage { display: flex; flex-direction: column; }
+  .map-wrap { height: 70vh; min-height: 460px; }
+  .drawer { border-left: 0; border-top: 1px solid var(--line); }
+  .tab-panel { overflow: visible; }
+  .map-caption { display: none; }
+}
+@media (max-width: 560px) {
+  .brand .tag { display: none; }
+  .status-pill span.lbl { display: none; }
+  .status-pill { padding: 0 9px; }
+  .tool .select select { min-width: 120px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-search" viewBox="0 0 20 20"><circle cx="9" cy="9" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13.5 13.5 17 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-x" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5 5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+  <symbol id="i-contrast" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 3a7 7 0 0 1 0 14z" fill="currentColor"/></symbol>
+</svg>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 28 28" aria-hidden="true">
+        <path d="M7 20 14 7l7 13z" fill="none" stroke="var(--line-strong)" stroke-width="1.5" stroke-linejoin="round"/>
+        <circle cx="7" cy="20" r="3.4" fill="var(--cs)"/><circle cx="14" cy="7" r="3.4" fill="var(--math)"/><circle cx="21" cy="20" r="3.4" fill="var(--food)"/>
+      </svg>
+      <span class="name">VectorDB</span>
+      <span class="tag">Vector search lab</span>
+    </div>
+
+    <form class="searchbar" id="searchForm" role="search">
+      <svg class="i"><use href="#i-search"/></svg>
+      <input type="text" id="qInput" placeholder="Describe something: binary tree, sushi, basketball…" autocomplete="off" aria-label="Search the demo vectors">
+      <button class="btn primary" type="submit">Search</button>
+    </form>
+
+    <div class="top-right">
+      <span class="stat" id="statsLabel">Connecting…</span>
+      <button class="status-pill" id="ollamaBadge" type="button" title="Open document settings"><i class="led"></i><span class="lbl">Checking Ollama</span></button>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="Switch light and dark theme" title="Switch theme"><svg class="i"><use href="#i-contrast"/></svg></button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="map-wrap" id="mapWrap" aria-label="Semantic map of stored vectors">
+      <canvas id="scatter" role="img" aria-label="Scatter plot of vectors projected to two dimensions. Points of the same topic sit close together."></canvas>
+
+      <div class="map-tools" id="mapTools">
+        <div class="seg" role="radiogroup" aria-label="Search method" id="algoSeg">
+          <button type="button" role="radio" aria-checked="true"  data-algo="hnsw" title="Graph-based and approximate. The method production vector databases use.">HNSW</button>
+          <button type="button" role="radio" aria-checked="false" data-algo="kdtree" title="Splits space into boxes. Fast in low dimensions.">KD-tree</button>
+          <button type="button" role="radio" aria-checked="false" data-algo="bruteforce" title="Compares against every vector. Always exact, slowest at scale.">Brute force</button>
+        </div>
+        <span class="sep" aria-hidden="true"></span>
+        <label class="tool">Metric
+          <span class="select"><select class="field" id="metric">
+            <option value="cosine">Cosine similarity</option>
+            <option value="euclidean">Euclidean distance</option>
+            <option value="manhattan">Manhattan distance</option>
+          </select></span>
+        </label>
+        <label class="tool">Results
+          <input type="range" id="kSlider" min="1" max="10" value="5" aria-describedby="kLabel">
+          <output id="kLabel" class="num">5</output>
+        </label>
+        <span class="sep" aria-hidden="true"></span>
+        <div class="tools-actions">
+          <button class="btn quiet" type="button" id="benchBtn">Compare speeds</button>
+          <button class="btn quiet" type="button" id="addToggle" aria-expanded="false" aria-controls="addPop"><svg class="i" style="width:14px;height:14px"><use href="#i-plus"/></svg>Add a point</button>
+        </div>
+      </div>
+
+      <div class="popover" id="addPop" hidden>
+        <h3>Add a point to the demo index</h3>
+        <p>It's placed on the map by its keywords.</p>
+        <input class="field" type="text" id="addMeta" placeholder="Describe it, e.g. “merge sort”" aria-label="Description">
+        <span class="select"><select class="field" id="addCat" aria-label="Topic">
+          <option value="cs">CS &amp; algorithms</option>
+          <option value="math">Mathematics</option>
+          <option value="food">Food &amp; cooking</option>
+          <option value="sports">Sports &amp; games</option>
+        </select></span>
+        <button class="btn primary block" type="button" id="addBtn">Add point</button>
+      </div>
+
+      <div class="legend" id="legend" role="group" aria-label="Filter topics on the map"></div>
+      <div class="map-caption">Demo vectors and real document chunks are projected separately into 2D. Closeness is meaningful within each layer, not between the two layers.</div>
+
+      <div class="banner" id="serverBanner" hidden role="alert">
+        <h3>Can't reach the server</h3>
+        <p>Nothing is answering at <span class="code">localhost:8080</span>. Start the server with <span class="code">db.exe</span>, then try again.</p>
+        <button class="btn primary" type="button" id="retryBtn">Try again</button>
+      </div>
+    </section>
+
+    <aside class="drawer" aria-label="Details">
+      <div class="tabs" role="tablist">
+        <button class="tab on" role="tab" aria-selected="true"  data-tab="results" id="t-results" aria-controls="tab-results">Results</button>
+        <button class="tab"    role="tab" aria-selected="false" data-tab="docs"    id="t-docs"    aria-controls="tab-docs">Documents</button>
+        <button class="tab"    role="tab" aria-selected="false" data-tab="ask"     id="t-ask"     aria-controls="tab-ask">Ask AI</button>
+      </div>
+
+      <!-- Results -->
+      <div class="tab-panel on" id="tab-results" role="tabpanel" aria-labelledby="t-results">
+        <div class="section">
+          <h3>Search time</h3>
+          <div class="latency"><span class="val num" id="latBig">—</span><span class="sub" id="latSub">Run a search to measure it</span></div>
+        </div>
+
+        <div class="section">
+          <h3>Nearest matches</h3>
+          <div class="results" id="results">
+            <div class="empty">
+              <span>Search above to see the closest points, ranked. Lower distance means more similar.</span>
+              <div class="try" id="tryChips">
+                <button type="button">binary tree</button><button type="button">sushi</button><button type="button">basketball</button><button type="button">eigenvalue</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section" id="embSec" hidden>
+          <h3>Your query as numbers</h3>
+          <canvas id="vecCvs" role="img" aria-label="Bar chart of the 16 numbers that represent the query"></canvas>
+          <p class="caption">Each bar is one of 16 dimensions. Every group of four belongs to one topic.</p>
+        </div>
+
+        <div class="section" id="benchSec" hidden>
+          <h3>Speed comparison</h3>
+          <div class="bench" id="benchBars"></div>
+          <p class="caption" id="benchNote"></p>
+        </div>
+
+        <div class="section">
+          <h3>Index layers</h3>
+          <div class="layers" id="layers"><span class="caption">Loading…</span></div>
+          <p class="caption">Layer 0 holds every point. Higher layers are sparser shortcuts that HNSW uses to jump close before zooming in.</p>
+        </div>
+      </div>
+
+      <!-- Documents -->
+      <div class="tab-panel" id="tab-docs" role="tabpanel" aria-labelledby="t-docs">
+        <div class="section">
+          <h3>Local model</h3>
+          <div class="ollama-box" id="ollamaStatus">Checking…</div>
+        </div>
+
+        <div class="section">
+          <h3>Upload files</h3>
+          <p class="caption">Supported: TXT and PDFs with selectable text. Review and correct extracted text before indexing. Scanned/image-only PDFs and images are not supported in this build. Indexed chunks are saved locally and reloaded when the server restarts.</p>
+          <div class="form">
+            <input class="field" type="file" id="docFiles" aria-label="Choose TXT or selectable-text PDF files" accept=".pdf,.txt,application/pdf,text/plain" multiple>
+            <button class="btn primary block" type="button" id="uploadIndexBtn">Extract text for preview</button>
+            <div class="form-status" id="uploadStatus" role="status"></div>
+            <div class="preview-list" id="extractedPreview" hidden></div>
+            <button class="btn quiet block" type="button" id="indexPreviewBtn" hidden>Index reviewed text</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Add a document manually</h3>
+          <div class="form">
+            <input class="field" type="text" id="docTitle" placeholder="Title or topic" aria-label="Document title">
+            <textarea class="textarea" id="docText" aria-label="Document text" placeholder="Paste notes, a textbook excerpt or lecture content. Long text is split into overlapping chunks, and each chunk is embedded with nomic-embed-text."></textarea>
+            <button class="btn primary block" type="button" id="insertDocBtn">Embed and save</button>
+            <div class="form-status" id="insertStatus" role="status"></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Indexed chunks (<span id="docCountLabel">0</span>)</h3>
+          <div class="doc-list" id="docList"><span class="caption">No indexed chunks yet. Upload a TXT or selectable-text PDF, or paste text above.</span></div>
+        </div>
+      </div>
+
+      <!-- Ask -->
+      <div class="tab-panel" id="tab-ask" role="tabpanel" aria-labelledby="t-ask">
+        <div class="section">
+          <h3>Ask about your documents</h3>
+          <div class="form">
+            <textarea class="textarea" id="ragQuestion" rows="3" style="min-height:88px" aria-label="Your question" placeholder="What is dynamic programming?&#10;Explain the main idea of HNSW."></textarea>
+            <div class="ask-row">
+              <span class="select"><select class="field" id="ragK" aria-label="Passages to use">
+                <option value="2">Use 2 passages</option>
+                <option value="3" selected>Use 3 passages</option>
+                <option value="5">Use 5 passages</option>
+              </select></span>
+              <button class="btn primary" type="button" id="askBtn">Ask</button>
+            </div>
+            <p class="caption">Only sufficiently relevant passages are sent to the local model. Lower cosine distance means a closer match. If nothing is relevant, the assistant should say it cannot answer from your indexed documents. Press Ctrl+Enter to ask.</p>
+          </div>
+        </div>
+        <div class="section">
+          <div class="thread" id="chatHistory" aria-live="polite">
+            <div class="empty">Add a document first, then ask a question about it. The passages used for each answer show up under it.</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<div id="tip"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ════════════════════════════════════════════════════════════
+const API  = 'http://localhost:8080';
+const DIMS = 16;
+const CATS = {
+  cs:     { label: 'CS & algorithms' },
+  math:   { label: 'Mathematics' },
+  food:   { label: 'Food & cooking' },
+  sports: { label: 'Sports & games' },
+  doc:    { label: 'Your documents' }
+};
+const GROUPS = ['cs', 'math', 'food', 'sports'];
+const GROUP_LABEL = ['CS', 'Math', 'Food', 'Sports'];
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const fmtUs = us => us < 1000 ? us + ' μs' : (us / 1000).toFixed(2) + ' ms';
+const catKey = item => (CATS[item.category] ? item.category : 'default');
+const catLabel = key => (CATS[key] ? CATS[key].label : 'Other');
+
+// ════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════
+let allItems = [], pcaPoints = [], hitIds = new Set(), hitRank = new Map(), queryPt = null;
+let hoverId = null, pulse = 0, selAlgo = 'hnsw', searchResults = [], lastEmb = null;
+let hidden = new Set(), needsDraw = true, serverOnline = true;
+let C = {};                        // theme colors read from CSS
+let bounds = { minX: -1, maxX: 1, minY: -1, maxY: 1 };
+
+// ════════════════════════════════════════════════════════════
+//  THEME + COLORS
+// ════════════════════════════════════════════════════════════
+function readColors() {
+  const s = getComputedStyle(document.documentElement), g = n => s.getPropertyValue(n).trim();
+  C = { mapBg: g('--map-bg'), dot: g('--dot'), surface: g('--surface'), ink: g('--ink'), muted: g('--muted'), line: g('--line-strong'),
+        cs: g('--cs'), math: g('--math'), food: g('--food'), sports: g('--sports'), doc: g('--doc'), default: g('--muted') };
+}
+function hexA(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
+const colorOf = item => C[catKey(item)] || C.default;
+function invalidate() { needsDraw = true; }
+
+$('#themeBtn').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem('vdb-theme', next); } catch (_) {}
+  readColors(); if (lastEmb) drawVecChart(lastEmb); invalidate();
+});
+
+// ════════════════════════════════════════════════════════════
+//  TOAST
+// ════════════════════════════════════════════════════════════
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+// ════════════════════════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════════════════════════
+function switchTab(name) {
+  $$('.tab').forEach(t => { const on = t.dataset.tab === name; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
+  $$('.tab-panel').forEach(p => p.classList.toggle('on', p.id === 'tab-' + name));
+  if (name === 'docs') loadDocList();
+  if (name === 'results' && lastEmb) drawVecChart(lastEmb);
+}
+$$('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+$('#ollamaBadge').addEventListener('click', () => switchTab('docs'));
+
+// ════════════════════════════════════════════════════════════
+//  TEXT → 16-D EMBEDDING (for demo vectors)
+// ════════════════════════════════════════════════════════════
+const KW = {
+  cs:     ['algorithm','data','tree','graph','array','linked','hash','stack','queue','sort','binary','dynamic','programming','recursion','complexity','pointer','node','search','insert','bfs','dfs','heap','trie'],
+  math:   ['calculus','matrix','probability','theorem','integral','derivative','linear','algebra','equation','function','prime','modular','combinatorics','permutation','eigenvalue','statistics','proof'],
+  food:   ['food','pizza','sushi','ramen','pasta','recipe','cook','eat','restaurant','dish','ingredient','flavor','spice','noodle','bread','croissant','taco','fish','rice','soup'],
+  sports: ['sport','basketball','football','tennis','chess','swim','game','play','score','team','athlete','competition','match','tournament','olympic','dribble','tackle','serve']
+};
+
+function textToEmbedding(text) {
+  const t = text.toLowerCase(), ws = t.split(/\s+/);
+  const s = { cs: 0, math: 0, food: 0, sports: 0 };
+  for (const w of ws)
+    for (const [cat, kws] of Object.entries(KW))
+      for (const kw of kws) if (w.includes(kw) || kw.startsWith(w)) { s[cat] += 0.35; break; }
+  const mx = Math.max(...Object.values(s), 0.01);
+  const n = v => Math.min(v / mx * 0.88, 0.94);
+  const jitter = () => (Math.random() - .5) * .04;
+  const emb = new Array(16).fill(0.08);
+  const fill = (i, score) => {
+    if (score < .01) return;
+    const b = n(score);
+    emb[i] = Math.max(.05, b + jitter()); emb[i+1] = Math.max(.05, b + jitter());
+    emb[i+2] = Math.max(.05, b * .92 + jitter()); emb[i+3] = Math.max(.05, b * .87 + jitter());
+  };
+  fill(0, s.cs); fill(4, s.math); fill(8, s.food); fill(12, s.sports);
+  return emb;
+}
+
+// ════════════════════════════════════════════════════════════
+//  PCA (deterministic start so the map keeps its shape between reloads)
+// ════════════════════════════════════════════════════════════
+function seeded(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function pca2D(embs) {
+  const n = embs.length, d = embs[0].length;
+  if (n < 2) return embs.map(() => [0, 0]);
+  const rand = seeded(7);
+  const mean = new Array(d).fill(0);
+  for (const e of embs) for (let i = 0; i < d; i++) mean[i] += e[i] / n;
+  const X = embs.map(e => e.map((v, i) => v - mean[i]));
+  function powerIter(X, excl) {
+    let v = new Array(d).fill(0).map(() => rand() - .5);
+    if (excl) { let dot = v.reduce((s, vi, i) => s + vi * excl[i], 0); v = v.map((vi, i) => vi - dot * excl[i]); }
+    let nrm = Math.sqrt(v.reduce((s, vi) => s + vi * vi, 0)) || 1;
+    v = v.map(vi => vi / nrm);
+    for (let it = 0; it < 200; it++) {
+      const Xv = X.map(xi => xi.reduce((s, xij, j) => s + xij * v[j], 0));
+      const nv = new Array(d).fill(0);
+      for (let k = 0; k < n; k++) for (let j = 0; j < d; j++) nv[j] += X[k][j] * Xv[k];
+      if (excl) { let dot = nv.reduce((s, vi, i) => s + vi * excl[i], 0); for (let i = 0; i < d; i++) nv[i] -= dot * excl[i]; }
+      nrm = Math.sqrt(nv.reduce((s, vi) => s + vi * vi, 0));
+      if (nrm < 1e-10) break;
+      const prev = v.slice(); v = nv.map(vi => vi / nrm);
+      if (v.reduce((s, vi, i) => s + (vi - prev[i]) ** 2, 0) < 1e-12) break;
+    }
+    return v;
+  }
+  const pc1 = powerIter(X, null), pc2 = powerIter(X, pc1);
+  return X.map(x => [x.reduce((s, v, i) => s + v * pc1[i], 0), x.reduce((s, v, i) => s + v * pc2[i], 0)]);
+}
+
+// ════════════════════════════════════════════════════════════
+//  MAP
+// ════════════════════════════════════════════════════════════
+const sc = $('#scatter'), ctx = sc.getContext('2d'), mapWrap = $('#mapWrap');
+let W = 0, H = 0, dpr = 1, pad = { t: 90, r: 48, b: 80, l: 48 };
+const FONT = '"Bricolage Grotesque", system-ui, sans-serif';
+
+function resize() {
+  const r = mapWrap.getBoundingClientRect();
+  dpr = window.devicePixelRatio || 1; W = r.width; H = r.height;
+  sc.width = Math.round(W * dpr); sc.height = Math.round(H * dpr);
+  sc.style.width = W + 'px'; sc.style.height = H + 'px';
+  const tools = $('#mapTools'), legend = $('#legend'), narrow = W < 640;
+  const toolsBottom = tools.offsetTop + tools.offsetHeight;
+  mapWrap.style.setProperty('--tools-bottom', toolsBottom + 'px');
+  pad = { t: toolsBottom + 44, b: legend.offsetHeight + 44, l: narrow ? 28 : 56, r: narrow ? 28 : 56 };
+  invalidate();
+}
+new ResizeObserver(resize).observe(mapWrap);
+
+function w2c(wx, wy) {
+  const rx = bounds.maxX - bounds.minX || 1, ry = bounds.maxY - bounds.minY || 1;
+  return [pad.l + ((wx - bounds.minX) / rx) * (W - pad.l - pad.r), H - pad.b - ((wy - bounds.minY) / ry) * (H - pad.t - pad.b)];
+}
+const visible = () => pcaPoints.filter(p => !hidden.has(catKey(p.item)));
+
+function pill(text, x, y, bg, fg) {
+  ctx.font = `600 11.5px ${FONT}`;
+  const w = ctx.measureText(text).width + 16, h = 22;
+  ctx.fillStyle = bg; ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y - h / 2, w, h, 11); else ctx.rect(x, y - h / 2, w, h);
+  ctx.fill(); ctx.fillStyle = fg; ctx.textBaseline = 'middle'; ctx.fillText(text, x + 8, y + .5);
+}
+
+function draw() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = C.mapBg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = C.dot;
+  for (let x = 14; x < W; x += 28) for (let y = 14; y < H; y += 28) ctx.fillRect(x, y, 1.5, 1.5);
+
+  const vis = visible();
+
+  // Topic halos with labels, so clusters read at a glance
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  for (const key of Object.keys(CATS)) {
+    const pts = vis.filter(p => catKey(p.item) === key);
+    if (pts.length < 2) continue;
+    const scr = pts.map(p => w2c(p.x, p.y));
+    const cx = scr.reduce((s, q) => s + q[0], 0) / scr.length, cy = scr.reduce((s, q) => s + q[1], 0) / scr.length;
+    const r = Math.max(...scr.map(q => Math.hypot(q[0] - cx, q[1] - cy))) + 38;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, hexA(C[key], .17)); g.addColorStop(.65, hexA(C[key], .08)); g.addColorStop(1, hexA(C[key], 0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    const topY = Math.max(Math.min(...scr.map(q => q[1])) - 24, pad.t - 18);
+    ctx.font = `650 12.5px ${FONT}`; ctx.lineWidth = 4; ctx.lineJoin = 'round';
+    ctx.strokeStyle = C.mapBg; ctx.strokeText(CATS[key].label, cx, topY);
+    ctx.fillStyle = C[key]; ctx.fillText(CATS[key].label, cx, topY);
+  }
+  ctx.textAlign = 'left';
+
+  // Lines from the query to its matches
+  if (queryPt && hitIds.size > 0) {
+    const [qx, qy] = w2c(queryPt.x, queryPt.y);
+    ctx.strokeStyle = hexA(C.ink, .3); ctx.lineWidth = 1.2; ctx.setLineDash([4, 5]);
+    for (const p of vis) {
+      if (!hitIds.has(p.item.id)) continue;
+      const [px, py] = w2c(p.x, p.y);
+      ctx.beginPath(); ctx.moveTo(qx, qy); ctx.lineTo(px, py); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
+  // Ordinary points, dimmed when a search is active
+  const focus = hitIds.size > 0;
+  for (const p of vis) {
+    if (hitIds.has(p.item.id)) continue;
+    const [x, y] = w2c(p.x, p.y);
+    ctx.globalAlpha = focus ? .5 : 1;
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = colorOf(p.item); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = C.surface; ctx.stroke();
+    ctx.globalAlpha = 1;
+    if (hoverId === p.item.id) { ctx.beginPath(); ctx.arc(x, y, 11, 0, Math.PI * 2); ctx.strokeStyle = C.ink; ctx.lineWidth = 1.5; ctx.stroke(); }
+  }
+
+  // Matches: ringed and numbered by rank
+  for (const p of vis) {
+    if (!hitIds.has(p.item.id)) continue;
+    const [x, y] = w2c(p.x, p.y), col = colorOf(p.item);
+    const pr = 15 + (reduceMotion ? 0 : Math.sin(pulse) * 2.5);
+    ctx.beginPath(); ctx.arc(x, y, pr, 0, Math.PI * 2); ctx.strokeStyle = hexA(col, .5); ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = C.surface; ctx.stroke();
+    const rk = hitRank.get(p.item.id);
+    if (rk) { ctx.fillStyle = '#fff'; ctx.font = `700 11px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(rk, x, y + .5); ctx.textAlign = 'left'; }
+    if (hoverId === p.item.id) { ctx.beginPath(); ctx.arc(x, y, 19, 0, Math.PI * 2); ctx.strokeStyle = C.ink; ctx.lineWidth = 1.5; ctx.stroke(); }
+  }
+
+  // Query marker
+  if (queryPt) {
+    const [qx, qy] = w2c(queryPt.x, queryPt.y);
+    ctx.save(); ctx.translate(qx, qy); ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const a = (i * Math.PI / 5) - Math.PI / 2, rr = i % 2 === 0 ? 12 : 5; i === 0 ? ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr) : ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fillStyle = C.ink; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = C.surface; ctx.stroke(); ctx.restore();
+    pill('Your query', qx + 17, qy, C.ink, C.surface);
+  }
+
+  if (!reduceMotion && hitIds.size) pulse += 0.06;
+}
+
+function frame() {
+  if (needsDraw || (hitIds.size && !reduceMotion)) { needsDraw = false; draw(); }
+  requestAnimationFrame(frame);
+}
+
+// Hover + tooltip
+const tip = $('#tip');
+function pickAt(e) {
+  const rect = sc.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let best = 16, hit = null;
+  for (const p of visible()) {
+    const [cx, cy] = w2c(p.x, p.y), d = Math.hypot(mx - cx, my - cy);
+    if (d < best) { best = d; hit = p.item; }
+  }
+  const nid = hit ? hit.id : null;
+  if (nid !== hoverId) { hoverId = nid; invalidate(); }
+  if (hit) {
+    tip.innerHTML = `<b style="color:${colorOf(hit)};filter:brightness(1.15)">${esc(catLabel(catKey(hit)))}</b>${esc(hit.metadata)}`;
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    tip.style.left = Math.min(e.clientX + 14, innerWidth - tw - 8) + 'px';
+    tip.style.top  = Math.min(Math.max(e.clientY - th - 10, 8), innerHeight - th - 8) + 'px';
+  } else tip.style.display = 'none';
+}
+sc.addEventListener('pointermove', pickAt);
+sc.addEventListener('pointerdown', pickAt);
+sc.addEventListener('pointerleave', () => { hoverId = null; tip.style.display = 'none'; invalidate(); });
+
+// ════════════════════════════════════════════════════════════
+//  SERVER STATE
+// ════════════════════════════════════════════════════════════
+function setOnline(ok) {
+  serverOnline = ok;
+  $('#serverBanner').hidden = ok;
+  if (!ok) { $('#statsLabel').textContent = 'Server offline'; setOllamaPill('err', 'Server offline'); }
+}
+
+async function loadItems() {
+  try {
+    const [itemsRes, docsRes] = await Promise.all([
+      fetch(API + '/items'),
+      fetch(API + '/doc/points')
+    ]);
+    allItems = await itemsRes.json();
+    const docItems = docsRes.ok ? await docsRes.json() : [];
+    setOnline(true);
+
+    // Demo vectors use the hand-crafted 16D space.
+    const demoCoords = allItems.length >= 2
+      ? pca2D(allItems.map(v => v.embedding))
+      : allItems.map(() => [0, 0]);
+    const demoPoints = allItems.map((item, i) => ({ x: demoCoords[i][0], y: demoCoords[i][1], item }));
+
+    // Document chunks use their real Ollama embeddings (typically 768D).
+    // Project them separately and place the document layer beside the demo map.
+    // Distances within each layer are meaningful; distances across layers are not.
+    let docPoints = [];
+    if (docItems.length) {
+      const validDocs = docItems.filter(d => Array.isArray(d.embedding) && d.embedding.length > 0);
+      if (validDocs.length) {
+        const coords = pca2D(validDocs.map(d => d.embedding));
+        let dx0 = Infinity, dx1 = -Infinity, dy0 = Infinity, dy1 = -Infinity;
+        coords.forEach(([x, y]) => { dx0 = Math.min(dx0, x); dx1 = Math.max(dx1, x); dy0 = Math.min(dy0, y); dy1 = Math.max(dy1, y); });
+        const demoX0 = demoPoints.length ? Math.min(...demoPoints.map(p => p.x)) : -1;
+        const demoX1 = demoPoints.length ? Math.max(...demoPoints.map(p => p.x)) : 1;
+        const demoY0 = demoPoints.length ? Math.min(...demoPoints.map(p => p.y)) : -1;
+        const demoY1 = demoPoints.length ? Math.max(...demoPoints.map(p => p.y)) : 1;
+        const span = Math.max(demoX1 - demoX0, demoY1 - demoY0, 1);
+        const docSpanX = dx1 - dx0 || 1, docSpanY = dy1 - dy0 || 1;
+        const docScale = Math.min(span * 0.7 / docSpanX, span * 0.7 / docSpanY);
+        const docOffsetX = demoX1 + span * 0.45;
+        const docCenterY = (demoY0 + demoY1) / 2;
+        docPoints = validDocs.map((item, i) => ({
+          x: docOffsetX + (coords[i][0] - (dx0 + dx1) / 2) * docScale,
+          y: docCenterY + (coords[i][1] - (dy0 + dy1) / 2) * docScale,
+          item: { ...item, id: -Math.abs(Number(item.id)), metadata: item.title || item.metadata || 'Document chunk', category: 'doc' }
+        }));
+      }
+    }
+
+    pcaPoints = [...demoPoints, ...docPoints];
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const p of pcaPoints) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+    if (pcaPoints.length) {
+      const px = (x1 - x0) * .18 || .1, py = (y1 - y0) * .18 || .1;
+      bounds = { minX: x0 - px, maxX: x1 + px, minY: y0 - py, maxY: y1 + py };
+    } else {
+      bounds = { minX: -1, maxX: 1, minY: -1, maxY: 1 };
+    }
+
+    $('#statsLabel').textContent = `${allItems.length} demo vectors, ${docPoints.length} document chunks`;
+    renderLegend(); invalidate();
+    return true;
+  } catch (err) {
+    console.error('Could not load vector/document points:', err);
+    setOnline(false); return false;
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  LEGEND (click to show or hide a topic)
+// ════════════════════════════════════════════════════════════
+function renderLegend() {
+  const counts = {}; pcaPoints.forEach(p => { const k = catKey(p.item); counts[k] = (counts[k] || 0) + 1; });
+  $('#legend').innerHTML = Object.keys(CATS).filter(k => counts[k]).map(k =>
+    `<button type="button" class="legend-chip" data-cat="${k}" style="--c:var(--${k})" aria-pressed="${!hidden.has(k)}"><i></i>${esc(CATS[k].label)}<span class="count num">${counts[k]}</span></button>`
+  ).join('');
+  requestAnimationFrame(resize);
+}
+$('#legend').addEventListener('click', e => {
+  const b = e.target.closest('.legend-chip'); if (!b) return;
+  const k = b.dataset.cat; hidden.has(k) ? hidden.delete(k) : hidden.add(k);
+  b.setAttribute('aria-pressed', !hidden.has(k)); invalidate();
+});
+
+// ════════════════════════════════════════════════════════════
+//  SEARCH CONTROLS
+// ════════════════════════════════════════════════════════════
+$$('#algoSeg button').forEach(b => b.addEventListener('click', () => {
+  $$('#algoSeg button').forEach(x => x.setAttribute('aria-checked', x === b));
+  selAlgo = b.dataset.algo;
+}));
+$('#kSlider').addEventListener('input', e => { $('#kLabel').textContent = e.target.value; });
+$('#searchForm').addEventListener('submit', e => { e.preventDefault(); runSearch(); });
+$('#tryChips').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $('#qInput').value = b.textContent; runSearch(); });
+
+function locateQuery(results) {
+  if (!results.length) return;
+  let sx = 0, sy = 0, sw = 0;
+  for (let i = 0; i < Math.min(3, results.length); i++) {
+    const pt = pcaPoints.find(p => p.item.id === results[i].id);
+    if (pt) { const w = 1 / (i + 1); sx += pt.x * w; sy += pt.y * w; sw += w; }
+  }
+  if (sw > 0) queryPt = { x: sx / sw + (Math.random() - .5) * .015, y: sy / sw + (Math.random() - .5) * .015 };
+}
+
+async function runSearch() {
+  const text = $('#qInput').value.trim(); if (!text) { $('#qInput').focus(); return; }
+  const emb = textToEmbedding(text), k = parseInt($('#kSlider').value), metric = $('#metric').value;
+  switchTab('results');
+  try {
+    const r = await fetch(`${API}/search?v=${emb.join(',')}&k=${k}&metric=${metric}&algo=${selAlgo}`), data = await r.json();
+    setOnline(true);
+    searchResults = data.results || [];
+    hitIds = new Set(searchResults.map(x => x.id));
+    hitRank = new Map(searchResults.map((x, i) => [x.id, i + 1]));
+    const us = data.latencyUs || 0;
+    $('#latBig').textContent = fmtUs(us);
+    $('#latSub').textContent = `${{ hnsw: 'HNSW', kdtree: 'KD-tree', bruteforce: 'Brute force' }[selAlgo]}, ${metric}, top ${k}`;
+    locateQuery(searchResults);
+    renderResults(searchResults); lastEmb = emb; $('#embSec').hidden = false; drawVecChart(emb); invalidate();
+  } catch (_) { setOnline(false); toast("Couldn't reach the server on :8080."); }
+}
+
+function renderResults(results) {
+  const box = $('#results');
+  if (!results || !results.length) { box.innerHTML = '<div class="empty">No matches. Try different words or add more points.</div>'; return; }
+  box.innerHTML = results.map((r, i) => {
+    const k = CATS[r.category] ? r.category : 'default';
+    return `<div class="rcard" data-id="${r.id}" style="--c:var(--${k === 'default' ? 'muted' : k})">
+      <span class="rank">${i + 1}</span>
+      <div><div class="rtext">${esc(r.metadata)}</div>
+        <div class="rmeta"><span class="pill">${esc(catLabel(k))}</span><span class="num">distance ${Number(r.distance).toFixed(4)}</span></div></div>
+      <button class="remove" type="button" data-del="${r.id}" aria-label="Remove from index" title="Remove from index"><svg class="i"><use href="#i-x"/></svg></button>
+    </div>`;
+  }).join('');
+}
+$('#results').addEventListener('mouseover', e => { const c = e.target.closest('.rcard'); if (c) { hoverId = +c.dataset.id; c.classList.add('hover'); invalidate(); } });
+$('#results').addEventListener('mouseout',  e => { const c = e.target.closest('.rcard'); if (c) { hoverId = null; c.classList.remove('hover'); invalidate(); } });
+$('#results').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) deleteItem(+b.dataset.del); });
+
+function drawVecChart(emb) {
+  const vc = $('#vecCvs'), cssW = vc.parentElement.clientWidth; if (!cssW) return;
+  const cssH = 92, d = window.devicePixelRatio || 1;
+  vc.width = cssW * d; vc.height = cssH * d;
+  const vx = vc.getContext('2d'); vx.setTransform(d, 0, 0, d, 0, 0);
+  vx.clearRect(0, 0, cssW, cssH);
+  const bw = cssW / DIMS, base = 72, maxH = 66;
+  for (let i = 0; i < DIMS; i++) {
+    const h = Math.max(2, emb[i] * maxH), x = i * bw + 2, col = C[GROUPS[Math.floor(i / 4)]];
+    vx.fillStyle = col; vx.beginPath();
+    if (vx.roundRect) vx.roundRect(x, base - h, bw - 4, h, [3, 3, 0, 0]); else vx.rect(x, base - h, bw - 4, h);
+    vx.fill();
+  }
+  vx.font = `550 11.5px ${FONT}`; vx.textAlign = 'center'; vx.textBaseline = 'alphabetic';
+  GROUPS.forEach((g, gi) => { vx.fillStyle = C[g]; vx.fillText(GROUP_LABEL[gi], (gi * 4 + 2) * bw, 88); });
+}
+
+async function runBenchmark() {
+  const text = $('#qInput').value.trim() || 'binary tree algorithm';
+  const emb = textToEmbedding(text), metric = $('#metric').value, btn = $('#benchBtn');
+  btn.disabled = true; switchTab('results');
+  try {
+    const r = await fetch(`${API}/benchmark?v=${emb.join(',')}&k=5&metric=${metric}`), d = await r.json();
+    setOnline(true);
+    $('#benchSec').hidden = false;
+    const rows = [
+      { lbl: 'Brute force', us: d.bruteforceUs, col: '#8793AB' },
+      { lbl: 'KD-tree',     us: d.kdtreeUs,     col: '#5B7BE8' },
+      { lbl: 'HNSW',        us: d.hnswUs,       col: 'var(--ink)' }
+    ];
+    const mx = Math.max(...rows.map(r => r.us), 1);
+    $('#benchBars').innerHTML = rows.map(({ lbl, us, col }) =>
+      `<div class="brow"><div class="blabel"><span>${lbl}</span><span class="num">${fmtUs(us)}</span></div><div class="btrack"><div class="bfill" style="width:${Math.max(us / mx * 100, 2)}%;background:${col}"></div></div></div>`).join('');
+    const fastest = rows.reduce((a, b) => (b.us < a.us ? b : a));
+    $('#benchNote').textContent = `Fastest on this query: ${fastest.lbl}. With only a few dozen vectors the differences are tiny. HNSW pulls ahead as the index grows.`;
+  } catch (_) { setOnline(false); toast("Couldn't reach the server on :8080."); }
+  btn.disabled = false;
+}
+$('#benchBtn').addEventListener('click', runBenchmark);
+
+async function loadHNSW() {
+  try {
+    const r = await fetch(API + '/hnsw-info'), d = await r.json();
+    const maxN = d.nodesPerLayer[0] || 1;
+    $('#layers').innerHTML = d.nodesPerLayer.map((cnt, lyr) => {
+      const edg = d.edgesPerLayer[lyr] || 0;
+      return `<div class="lrow"><span>Layer ${lyr}</span><div class="ltrack"><div class="lfill" style="width:${Math.max(cnt / maxN * 100, 2)}%"></div></div><span class="lcount num">${cnt} nodes, ${edg} links</span></div>`;
+    }).join('') || '<span class="caption">The index is empty.</span>';
+  } catch (_) {}
+}
+
+// ════════════════════════════════════════════════════════════
+//  ADD / DELETE DEMO POINTS
+// ════════════════════════════════════════════════════════════
+const pop = $('#addPop'), addToggle = $('#addToggle');
+function setPop(open) { pop.hidden = !open; addToggle.setAttribute('aria-expanded', open); if (open) $('#addMeta').focus(); }
+addToggle.addEventListener('click', () => setPop(pop.hidden));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop.hidden) { setPop(false); addToggle.focus(); } });
+document.addEventListener('pointerdown', e => { if (!pop.hidden && !pop.contains(e.target) && !addToggle.contains(e.target)) setPop(false); });
+$('#addMeta').addEventListener('keydown', e => { if (e.key === 'Enter') addVector(); });
+$('#addBtn').addEventListener('click', addVector);
+
+async function addVector() {
+  const meta = $('#addMeta').value.trim(), cat = $('#addCat').value;
+  if (!meta) { $('#addMeta').focus(); return; }
+  const emb = textToEmbedding(meta + ' ' + cat);
+  try {
+    await fetch(API + '/insert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metadata: meta, category: cat, embedding: emb }) });
+    $('#addMeta').value = ''; setPop(false); toast('Point added');
+    await loadItems(); loadHNSW();
+  } catch (_) { toast("Couldn't add the point. Is the server running?"); }
+}
+
+async function deleteItem(id) {
+  try {
+    await fetch(`${API}/delete/${id}`, { method: 'DELETE' });
+    searchResults = searchResults.filter(r => r.id !== id); hitIds.delete(id); hitRank.delete(id);
+    renderResults(searchResults); await loadItems(); loadHNSW(); toast('Point removed');
+  } catch (_) { toast("Couldn't remove the point. Is the server running?"); }
+}
+
+// ════════════════════════════════════════════════════════════
+//  OLLAMA + DOCUMENTS
+// ════════════════════════════════════════════════════════════
+function setOllamaPill(state, text) {
+  const b = $('#ollamaBadge'); b.className = 'status-pill' + (state ? ' ' + state : '');
+  b.querySelector('.lbl').textContent = text;
+}
+
+async function checkOllamaStatus() {
+  const box = $('#ollamaStatus');
+  try {
+    const r = await fetch(API + '/status'), d = await r.json();
+    if (d.ollamaAvailable) {
+      setOllamaPill('ok', 'Ollama ready');
+      box.className = 'ollama-box ok';
+      box.innerHTML = `<strong style="--c:var(--good)"><i></i>Running</strong>
+        <div class="row"><span>Embeddings</span><span class="num">${esc(d.embedModel)}</span></div>
+        <div class="row"><span>Answers</span><span class="num">${esc(d.genModel)}</span></div>
+        <div class="row"><span>Dimensions</span><span class="num">${esc(d.docDims || 'set by first document')}</span></div>
+        <div class="row"><span>Documents</span><span class="num">${esc(d.docCount)}</span></div>`;
+    } else {
+      setOllamaPill('err', 'Ollama offline');
+      box.className = 'ollama-box err';
+      box.innerHTML = `<strong style="--c:var(--bad)"><i></i>Not running</strong>
+        <span>Documents and Ask AI need Ollama. Install it from ollama.com, then run:</span>
+        <div class="steps"><span class="code">ollama pull nomic-embed-text</span><span class="code">ollama pull llama3.2</span></div>`;
+    }
+  } catch (_) { setOllamaPill('err', 'Server offline'); box.className = 'ollama-box err'; box.textContent = "Can't reach the server on localhost:8080."; }
+}
+
+function formStatus(msg, kind) { const s = $('#insertStatus'); s.className = 'form-status' + (kind ? ' ' + kind : ''); s.textContent = msg; }
+
+async function insertDocument() {
+  const title = $('#docTitle').value.trim(), text = $('#docText').value.trim(), btn = $('#insertDocBtn');
+  if (!title || !text) { formStatus('Add both a title and some text.', 'err'); return; }
+  btn.disabled = true; btn.textContent = 'Embedding…'; formStatus('Embedding with nomic-embed-text…');
+  try {
+    const r = await fetch(API + '/doc/insert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, text }) });
+    const d = await r.json();
+    if (d.error) formStatus(d.error, 'err');
+    else {
+      formStatus(`Saved ${d.chunks} chunk${d.chunks === 1 ? '' : 's'} (${d.dims} dimensions).`, 'ok');
+      $('#docTitle').value = ''; $('#docText').value = '';
+      // Refresh the map with the actual Ollama embeddings for every indexed chunk.
+      await loadItems();
+      loadHNSW();
+      loadDocList();
+      checkOllamaStatus();
+    }
+  } catch (_) { formStatus("Couldn't reach the server.", 'err'); }
+  btn.disabled = false; btn.textContent = 'Embed and save';
+}
+$('#insertDocBtn').addEventListener('click', insertDocument);
+
+async function loadDocList() {
+  try {
+    const r = await fetch(API + '/doc/list'), docs = await r.json();
+    $('#docCountLabel').textContent = docs.length;
+    if (!docs.length) { $('#docList').innerHTML = '<span class="caption">No indexed chunks yet. Upload a TXT or selectable-text PDF, or paste text above.</span>'; return; }
+    $('#docList').innerHTML = docs.map(d => `
+      <div class="dcard">
+        <div class="dcard-title">${esc(d.title)}</div>
+        <div class="dcard-preview">${esc(d.preview)}</div>
+        <div class="dcard-foot"><span class="num">${esc(d.words)} words</span>
+          <button class="remove" type="button" data-deldoc="${d.id}" aria-label="Delete document" title="Delete document"><svg class="i"><use href="#i-x"/></svg></button></div>
+      </div>`).join('');
+  } catch (_) {}
+}
+$('#docList').addEventListener('click', e => { const b = e.target.closest('[data-deldoc]'); if (b) deleteDoc(+b.dataset.deldoc); });
+
+async function deleteDoc(id) {
+  try {
+    await fetch(`${API}/doc/delete/${id}`, { method: 'DELETE' });
+    await loadItems();
+    loadDocList();
+    checkOllamaStatus();
+    toast('Document deleted');
+  } catch (_) { toast("Couldn't delete the document."); }
+}
+
+// ════════════════════════════════════════════════════════════
+//  ASK AI (RAG)
+// ════════════════════════════════════════════════════════════
+$('#ragQuestion').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) askAI(); });
+$('#askBtn').addEventListener('click', askAI);
+$('#chatHistory').addEventListener('click', e => {
+  const c = e.target.closest('.chip'); if (!c) return;
+  const panel = c.nextElementSibling, open = panel.hidden;
+  panel.hidden = !open; c.setAttribute('aria-expanded', open);
+});
+
+function highlightOnMap(question, k) {
+  hitIds = new Set();
+  hitRank = new Map();
+  queryPt = null;
+  invalidate();
+
+  fetch(API + '/doc/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, k })
+  })
+    .then(res => res.json())
+    .then(data => {
+      hitIds = new Set();
+      hitRank = new Map();
+      const contexts = data.contexts || [];
+      let sx = 0, sy = 0, sw = 0;
+      contexts.forEach((c, i) => {
+        const pt = pcaPoints.find(p =>
+          p.item.category === 'doc' && Math.abs(Number(p.item.id)) === Number(c.id)
+        );
+        if (pt) {
+          hitIds.add(pt.item.id);
+          hitRank.set(pt.item.id, i + 1);
+          const weight = 1 / (i + 1);
+          sx += pt.x * weight;
+          sy += pt.y * weight;
+          sw += weight;
+        }
+      });
+      if (sw > 0) queryPt = { x: sx / sw, y: sy / sw };
+      invalidate();
+    })
+    .catch(err => {
+      console.error('Could not highlight retrieved document passages:', err);
+      hitIds = new Set();
+      hitRank = new Map();
+      queryPt = null;
+      invalidate();
+    });
+}
+
+async function askAI() {
+  const question = $('#ragQuestion').value.trim(); if (!question) { $('#ragQuestion').focus(); return; }
+  const k = parseInt($('#ragK').value), btn = $('#askBtn'), history = $('#chatHistory');
+  btn.disabled = true; btn.textContent = 'Thinking…';
+  if (history.querySelector('.empty')) history.innerHTML = '';
+
+  const turn = document.createElement('div'); turn.className = 'turn';
+  const q = document.createElement('div'); q.className = 'q'; q.textContent = question;
+  const think = document.createElement('div'); think.className = 'thinking';
+  think.innerHTML = '<div class="spinner"></div>Finding passages and writing an answer…';
+  turn.append(q, think); history.appendChild(turn);
+  turn.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+  $('#ragQuestion').value = '';
+
+  highlightOnMap(question, k);
+
+  try {
+    const r = await fetch(API + '/doc/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, k }) });
+    const d = await r.json();
+    if (!r.ok && !d.error) d.error = `Request failed (HTTP ${r.status}).`;
+    think.remove();
+    const a = document.createElement('div'); a.className = 'a';
+    const text = document.createElement('div'); text.className = 'a-text';
+    a.appendChild(text);
+    if (d.error) { text.classList.add('err'); text.textContent = d.error; }
+    else {
+      const ctxs = d.contexts || [];
+      if (d.model) { const m = document.createElement('div'); m.className = 'a-model'; m.textContent = 'Answered by ' + d.model; a.appendChild(m); }
+      if (ctxs.length) {
+        const wrap = document.createElement('div'); wrap.className = 'ctx';
+        wrap.innerHTML = `<div class="ctx-title">Passages used (${ctxs.length}) · cosine distance (lower is closer)</div>` + ctxs.map((c, i) =>
+          `<button type="button" class="chip" aria-expanded="false" title="${esc(c.title)}">${i + 1}. ${esc(c.title)} (${Number(c.distance).toFixed(3)})</button><div class="ctx-expand" hidden>${esc(c.text)}</div>`).join('');
+        a.appendChild(wrap);
+      }
+      const full = String(d.answer ?? '');
+      if (reduceMotion) text.textContent = full;
+      else {
+        text.classList.add('typing'); let i = 0; const step = Math.max(3, Math.ceil(full.length / 220));
+        const timer = setInterval(() => {
+          if (i >= full.length) { clearInterval(timer); text.classList.remove('typing'); return; }
+          text.textContent += full.slice(i, i + step); i += step;
+          turn.scrollIntoView({ block: 'nearest' });
+        }, 18);
+      }
+    }
+    turn.appendChild(a);
+  } catch (_) {
+    think.remove();
+    const a = document.createElement('div'); a.className = 'a';
+    a.innerHTML = '<div class="a-text err">The server didn\'t respond. Check that it\'s running on localhost:8080.</div>';
+    turn.appendChild(a);
+  }
+  btn.disabled = false; btn.textContent = 'Ask';
+  turn.scrollIntoView({ block: 'nearest' });
+}
+
+
+// ════════════════════════════════════════════════════════════
+//  FILE UPLOAD: EXTRACT → REVIEW/EDIT → INDEX
+// ════════════════════════════════════════════════════════════
+const uploadStatus = (msg, kind = '') => {
+  const el = $('#uploadStatus');
+  if (el) { el.textContent = msg; el.className = 'form-status' + (kind ? ' ' + kind : ''); }
+};
+let extractedPreviews = [];
+
+async function extractUploadedFile(file) {
+  const name = file.name || 'Uploaded document';
+  const ext = name.split('.').pop().toLowerCase();
+
+  if (ext === 'txt' || file.type === 'text/plain') {
+    const text = await file.text();
+    if (!text.trim()) throw new Error('This TXT file is empty.');
+    return { text, method: 'TXT text extraction' };
+  }
+
+  if (ext === 'pdf' || file.type === 'application/pdf') {
+    if (!window.pdfjsLib) throw new Error('PDF.js did not load. Check your internet connection and reload the page.');
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    const pages = [];
+    for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+      uploadStatus(`${name}: extracting PDF page ${pageNo}/${pdf.numPages}…`);
+      const page = await pdf.getPage(pageNo);
+      const content = await page.getTextContent();
+      const line = content.items.map(item => item.str || '').join(' ').trim();
+      if (line) pages.push(`Page ${pageNo}\n${line}`);
+    }
+    const text = pages.join('\n\n').trim();
+    if (!text) throw new Error('No selectable text found. Scanned/image-only PDFs are not supported because OCR has been removed.');
+    return { text, method: `PDF text extraction (${pages.length} page(s) with text)` };
+  }
+
+  if (file.type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext)) {
+    throw new Error('Image OCR has been removed from this build. Upload a TXT file or a PDF with selectable text instead.');
+  }
+
+  throw new Error('Unsupported file type. Choose TXT or a PDF with selectable text.');
+}
+function renderExtractedPreviews() {
+  const list = $('#extractedPreview');
+  const indexBtn = $('#indexPreviewBtn');
+  list.replaceChildren();
+  for (const item of extractedPreviews) {
+    const card = document.createElement('div');
+    card.className = 'preview-card';
+    const head = document.createElement('div');
+    head.className = 'preview-head';
+    const title = document.createElement('span');
+    title.textContent = item.file.name;
+    const method = document.createElement('small');
+    method.textContent = item.method;
+    head.append(title, method);
+    const textarea = document.createElement('textarea');
+    textarea.className = 'textarea';
+    textarea.setAttribute('aria-label', `Review extracted text from ${item.file.name}`);
+    textarea.value = item.text;
+    textarea.addEventListener('input', () => { item.text = textarea.value; });
+    const note = document.createElement('p');
+    note.className = 'caption';
+    note.textContent = item.confidence !== undefined && item.confidence < 65
+      ? 'OCR confidence is modest. Check names, numbers, and labels before indexing.'
+      : 'Review or correct the extracted text before indexing.';
+    card.append(head, textarea, note);
+    list.append(card);
+  }
+  list.hidden = extractedPreviews.length === 0;
+  indexBtn.hidden = extractedPreviews.length === 0;
+}
+
+async function uploadAndIndexFiles() {
+  const input = $('#docFiles');
+  const button = $('#uploadIndexBtn');
+  const files = Array.from(input.files || []);
+  if (!files.length) { uploadStatus('Choose at least one file first.', 'err'); return; }
+
+  button.disabled = true;
+  $('#indexPreviewBtn').disabled = true;
+  extractedPreviews = [];
+  renderExtractedPreviews();
+  const errors = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        uploadStatus(`Extracting ${i + 1}/${files.length}: ${file.name}…`);
+        const result = await extractUploadedFile(file);
+        const text = (result.text || '').trim();
+        if (!text) throw new Error('No text was extracted.');
+        extractedPreviews.push({ file, text, method: result.method, confidence: result.confidence });
+        renderExtractedPreviews();
+      } catch (err) {
+        errors.push(`${file.name}: ${err.message || 'unknown error'}`);
+      }
+    }
+    if (extractedPreviews.length) {
+      uploadStatus(`${extractedPreviews.length} file(s) extracted. Review or edit the text below, then choose “Index reviewed text”.`, errors.length ? 'err' : 'ok');
+    } else {
+      uploadStatus(`No files could be extracted. ${errors.join(' | ')}`, 'err');
+    }
+  } finally {
+    button.disabled = false;
+    $('#indexPreviewBtn').disabled = false;
+  }
+}
+
+async function indexReviewedText() {
+  const button = $('#indexPreviewBtn');
+  if (!extractedPreviews.length) { uploadStatus('Extract text first.', 'err'); return; }
+  button.disabled = true;
+  let success = 0;
+  const errors = [];
+  try {
+    for (let i = 0; i < extractedPreviews.length; i++) {
+      const item = extractedPreviews[i];
+      const text = (item.text || '').trim();
+      if (!text) { errors.push(`${item.file.name}: preview text is empty.`); continue; }
+      try {
+        uploadStatus(`Indexing ${i + 1}/${extractedPreviews.length}: ${item.file.name}…`);
+        const response = await fetch(API + '/doc/insert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: item.file.name, text })
+        });
+        const result = await response.json();
+        if (!response.ok || result.error) throw new Error(result.error || `Server returned HTTP ${response.status}`);
+        success++;
+        await loadDocList();
+      } catch (err) {
+        errors.push(`${item.file.name}: ${err.message || 'unknown error'}`);
+      }
+    }
+    if (success) {
+      await loadItems();
+      await loadDocList();
+      checkOllamaStatus();
+    }
+    uploadStatus(`${success} of ${extractedPreviews.length} file(s) indexed successfully.${errors.length ? ' Issues: ' + errors.join(' | ') : ''}`, errors.length ? 'err' : 'ok');
+    if (success === extractedPreviews.length) {
+      $('#docFiles').value = '';
+      extractedPreviews = [];
+      renderExtractedPreviews();
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+const uploadIndexBtn = $('#uploadIndexBtn');
+if (uploadIndexBtn) uploadIndexBtn.addEventListener('click', uploadAndIndexFiles);
+const indexPreviewBtn = $('#indexPreviewBtn');
+if (indexPreviewBtn) indexPreviewBtn.addEventListener('click', indexReviewedText);
+
+// ════════════════════════════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════════════════════════════
+async function boot() {
+  const ok = await loadItems();
+  if (ok) { loadHNSW(); checkOllamaStatus(); }
+}
+$('#retryBtn').addEventListener('click', boot);
+readColors(); resize(); frame(); boot();
+</script>
+</body>
+</html>
